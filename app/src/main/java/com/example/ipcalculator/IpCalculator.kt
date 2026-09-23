@@ -1,5 +1,7 @@
 package com.example.ipcalculator
 
+import android.app.Application
+
 
 import java.io.OutputStream
 

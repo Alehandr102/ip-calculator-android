@@ -43,6 +43,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import com.example.ipcalculator.ui.theme.IpCalculatorTheme
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.layout.wrapContentHeight
+import com.yandex.mobile.ads.banner.BannerAdView
+import com.yandex.mobile.ads.banner.BannerAdSize
+import com.yandex.mobile.ads.common.AdRequest
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -102,6 +108,22 @@ fun IpCalculatorScreen() {
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("IP калькулятор") }) },
+        bottomBar = {
+            AndroidView(
+                factory = { ctx ->
+                    val density = ctx.resources.displayMetrics.density
+                    val adWidthDp = (ctx.resources.displayMetrics.widthPixels / density).roundToInt()
+
+                    BannerAdView(ctx).apply {
+                        setAdSize(BannerAdSize.sticky(ctx, adWidthDp))
+                        loadAd(AdRequest.Builder("demo-banner-yandex").build())
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
