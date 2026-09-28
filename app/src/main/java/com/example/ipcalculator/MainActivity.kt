@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -28,8 +30,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,15 +43,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import com.example.ipcalculator.ui.theme.IpCalculatorTheme
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.foundation.layout.wrapContentHeight
-import com.yandex.mobile.ads.banner.BannerAdView
+import com.example.ipcalculator.ui.theme.IpCalculatorTheme
 import com.yandex.mobile.ads.banner.BannerAdSize
+import com.yandex.mobile.ads.banner.BannerAdView
 import com.yandex.mobile.ads.common.AdRequest
+import com.yandex.mobile.ads.common.YandexAds
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -80,49 +85,80 @@ fun IpCalculatorScreen() {
 
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
+    val context = LocalContext.current   // ОДИН раз
 
+    // --- Consent (ФЗ-152) ---
+    var consent by remember { mutableStateOf<Boolean?>(null) }
+
+    fun saveConsent(value: Boolean) {
+        context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("consent_given", value).apply()
+        YandexAds.setUserConsent(value)
+        consent = value
+    }
+
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        if (prefs.contains("consent_given")) {
+            val saved = prefs.getBoolean("consent_given", false)
+            YandexAds.setUserConsent(saved)
+            consent = saved
+        }
+    }
+
+    if (consent == null) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Согласие на обработку данных") },
+            text = { Text("Приложение показывает рекламу. Для подбора релевантных объявлений обрабатываются обезличенные данные устройства. Разрешить персонализацию рекламы?") },
+            confirmButton = {
+                TextButton(onClick = { saveConsent(true) }) { Text("Разрешить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { saveConsent(false) }) { Text("Только общая реклама") }
+            }
+        )
+    }
+
+    // --- Экран с баннером ---
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
     ) { uri ->
-        //Todo :здесь будем писать в файл
         if (uri == null) return@rememberLauncherForActivityResult
-
-
         val currentResult = result ?: return@rememberLauncherForActivityResult
-
         val np = appliedPrefix ?: return@rememberLauncherForActivityResult
 
         scope.launch {
-            val saveResult = saveSubnetsToFile(context,uri,currentResult,np)
-            if (saveResult.isSuccess){
+            val saveResult = saveSubnetsToFile(context, uri, currentResult, np)
+            if (saveResult.isSuccess) {
                 snackbarHostState.showSnackbar("Сохранено ✓")
-            }else {
-                //Показать ошибку
-                val errorMessage = saveResult.exceptionOrNull()?.message?:"Ошибка"
-                snackbarHostState.showSnackbar("Ошибка:$errorMessage")
+            } else {
+                val errorMessage = saveResult.exceptionOrNull()?.message ?: "Ошибка"
+                snackbarHostState.showSnackbar("Ошибка: $errorMessage")
             }
         }
-
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("IP калькулятор") }) },
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.app_name)) }) },
         bottomBar = {
-            AndroidView(
-                factory = { ctx ->
-                    val density = ctx.resources.displayMetrics.density
-                    val adWidthDp = (ctx.resources.displayMetrics.widthPixels / density).roundToInt()
+            // Баннер появляется только после явного ответа пользователя
+            if (consent != null) {
+                AndroidView(
+                    factory = { ctx ->
+                        val density = ctx.resources.displayMetrics.density
+                        val adWidthDp = (ctx.resources.displayMetrics.widthPixels / density).roundToInt()
 
-                    BannerAdView(ctx).apply {
-                        setAdSize(BannerAdSize.sticky(ctx, adWidthDp))
-                        loadAd(AdRequest.Builder("demo-banner-yandex").build())
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentHeight()
-            )
+                        BannerAdView(ctx).apply {
+                            setAdSize(BannerAdSize.sticky(ctx, adWidthDp))
+                            loadAd(AdRequest.Builder("demo-banner-yandex").build())
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentHeight()
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
@@ -345,14 +381,19 @@ private fun ResultRow(label: String, value: String) {
     }
 }
 
-private suspend fun saveSubnetsToFile(context: Context, uri: Uri,original: IpCalculator.SubnetResult, newPrefix:Int): Result<Unit>{
+private suspend fun saveSubnetsToFile(
+    context: Context,
+    uri: Uri,
+    original: IpCalculator.SubnetResult,
+    newPrefix: Int
+): Result<Unit> {
     return try {
-        context.contentResolver.openOutputStream(uri)?.use  {outputStream ->
+        context.contentResolver.openOutputStream(uri)?.use { outputStream ->
             IpCalculator.writeSplitToStream(outputStream, original, newPrefix)
-        }?: return Result.failure(Exception("Не удалось открыть поток для записи"))
+        } ?: return Result.failure(Exception("Не удалось открыть поток для записи"))
 
         Result.success(Unit)
-    }catch (e: Exception){
+    } catch (e: Exception) {
         Result.failure(e)
     }
 }
