@@ -54,6 +54,9 @@ import com.yandex.mobile.ads.common.AdRequest
 import com.yandex.mobile.ads.common.YandexAds
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import androidx.core.content.edit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,8 +94,9 @@ fun IpCalculatorScreen() {
     var consent by remember { mutableStateOf<Boolean?>(null) }
 
     fun saveConsent(value: Boolean) {
-        context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-            .edit().putBoolean("consent_given", value).apply()
+        context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE).edit {
+            putBoolean("consent_given", value)
+        }
         YandexAds.setUserConsent(value)
         consent = value
     }
@@ -386,11 +390,11 @@ private suspend fun saveSubnetsToFile(
     uri: Uri,
     original: IpCalculator.SubnetResult,
     newPrefix: Int
-): Result<Unit> {
-    return try {
+): Result<Unit> = withContext(Dispatchers.IO) {
+    try {
         context.contentResolver.openOutputStream(uri)?.use { outputStream ->
             IpCalculator.writeSplitToStream(outputStream, original, newPrefix)
-        } ?: return Result.failure(Exception("Не удалось открыть поток для записи"))
+        } ?: return@withContext Result.failure(Exception("Не удалось открыть поток для записи"))
 
         Result.success(Unit)
     } catch (e: Exception) {
